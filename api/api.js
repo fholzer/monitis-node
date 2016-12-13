@@ -17,18 +17,24 @@ function format_query_params(params) {
   return querystring.stringify(params);
 }
 
+function cb_wrapper(cb) {
+    return function(res) {
+        cb(undefined, res);
+    };
+}
+
 function get(host, path, call_params, res_cb) {
   'use strict';
   var api_params, call_checksum, query;
   api_params = request_params(call_params);
-  // debugging 
+  // debugging
   util.debug('GET: \n', api_params);
   // call_checksum = checksum(api_config.monitis_secretkey, api_params);
   api_params.checksum = checksum(global.monitis.secretkey, api_params);
   query = format_query_params(api_params);
-  https.get({host: host, path: path + "?" + query}, res_cb)
+  https.get({host: host, path: path + "?" + query}, res_parser(res_cb))
     .on('error', function (e) {
-      console.error(e);
+      res_cb(e);
     });
 }
 
@@ -36,7 +42,7 @@ function post(host, path, call_params, res_cb) {
   'use strict';
   var api_params, post_data, post_options, post_req;
   api_params = request_params(call_params);
-  // debugging 
+  // debugging
   util.debug('POST: \n', api_params);
   // call_checksum = checksum(api_config['monitis_secretkey'],api_params);
   api_params.checksum = checksum(global.monitis.secretkey, api_params);
@@ -51,9 +57,11 @@ function post(host, path, call_params, res_cb) {
     }
   };
 
-  post_req = https.request(post_options, res_cb)
+  post_req = https.request(post_options, res_parser(res_cb))
     .on('error', function (e) {
+      console.error('Some error occured. Hopefully this will tell you more:');
       console.error(e);
+      res_cb(e);
     });
   post_req.write(post_data);
   post_req.end();
@@ -72,15 +80,16 @@ function res_parser(callback) {
     parse_body = function parse_body() {
       try {
         result = JSON.parse(body);
+        if(result.error) {
+            callback(result.error)
+        }
+        callback(undefined, result);
       }
       catch(err) {
         result = err;
-      }
-      if (result instanceof Error) {
         console.log("Error parsing JSON: ", result, "\n", body , "\n");
-        return;
+        callback(err);
       }
-      callback(result);
     };
     response.on('data', append_chunk);
     response.on('end', parse_body);
@@ -90,7 +99,7 @@ function res_parser(callback) {
 
 function monitis_get(params, res_cb) {
   'use strict';
-  get(global.monitis.host, global.monitis.path, params, res_parser(res_cb));
+  get(global.monitis.host, global.monitis.path, params, res_cb);
 }
 
 function monitis_post_timestamp() {
@@ -113,7 +122,7 @@ function monitis_post(call_params, res_cb) {
   var api_params = request_params(call_params);
   api_params.timestamp = monitis_post_timestamp();
   post(global.monitis.host, global.monitis.path,
-    api_params, res_parser(res_cb));
+    api_params, res_cb);
 }
 
 function checktime() {
